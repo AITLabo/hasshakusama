@@ -18,6 +18,7 @@ public class Hachisha_StalkingAI : MonoBehaviour
     private NavMeshAgent agent;
     private Transform currentTarget;
     private MeshRenderer meshRenderer;
+    private bool isPlayerInSafeZone = false;
 
     void Start()
     {
@@ -31,8 +32,24 @@ public class Hachisha_StalkingAI : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// SafeZone からの入退場通知。SafeZone.cs から呼ばれる。
+    /// true: プレイヤーが安全地帯に入った → 追跡停止・姿を消す
+    /// false: 安全地帯を出た → 追跡再開
+    /// </summary>
+    public void SetSafeStatus(bool isSafe)
+    {
+        isPlayerInSafeZone = isSafe;
+        if (agent != null) agent.isStopped = isSafe;
+        // 安全地帯内では姿を消す（霧の中に溶け込む演出）
+        if (meshRenderer != null) meshRenderer.enabled = !isSafe;
+    }
+
     void Update()
     {
+        // プレイヤーが安全地帯にいる間は一切の追跡をしない
+        if (isPlayerInSafeZone) return;
+
         UpdateTarget();
         if (currentTarget == null) return;
 
@@ -100,12 +117,30 @@ public class Hachisha_StalkingAI : MonoBehaviour
 
     bool IsTargetVisible(Transform target)
     {
-        // 簡易：距離と遮蔽物の有無
         float dist = Vector3.Distance(transform.position, target.position);
-        if (dist < 5f) return true; // 近すぎれば見える
+        
+        // 懐中電灯チェック（プレイヤーの場合）
+        float detectionRange = stalkDistance;
+        Hachisha_PlayerController pc = target.GetComponent<Hachisha_PlayerController>();
+        if (pc != null && pc.flashlight != null && pc.flashlight.enabled)
+        {
+            detectionRange *= 2.0f; // 懐中電灯をつけていると2倍の距離でバレる
+        }
 
-        // TODO: Raycast による視線チェック
-        return dist < stalkDistance;
+        if (dist > detectionRange) return false;
+
+        // Raycast による視線（LOS）チェック
+        Vector3 direction = (target.position + Vector3.up * 1.5f) - (transform.position + Vector3.up * 1.5f);
+        RaycastHit hit;
+        if (Physics.Raycast(transform.position + Vector3.up * 1.5f, direction, out hit, detectionRange))
+        {
+            if (hit.transform == target || hit.transform.root == target.root)
+            {
+                return true; // 遮蔽物なしで見えている
+            }
+        }
+
+        return false;
     }
 
     void PursueTarget(float distance)
